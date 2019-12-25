@@ -7,16 +7,19 @@ namespace MyAssets.Characters.ThirdPerson
     [RequireComponent(typeof(Animator))]
     public class ThirdPersonCharacter : MonoBehaviour
     {
-        public enum QuickMovement { None, RollLeft, RollRight, DashLeft, DashRight }
+        public enum QuickMovement { None, RollForward, RollBackward, RollLeft, RollRight, DashLeft, DashRight }
+        public enum AttackType { None, Light, Heavy }
+        public enum Abilities { None, Ability1, Ability2, Ability3, Ability4 }
 
         [SerializeField] float m_MovingTurnSpeed = 360;
         [SerializeField] float m_StationaryTurnSpeed = 180;
-        [SerializeField] float m_JumpPower = 12f;
+        [SerializeField] float m_JumpSpeed = 6f;
+        [SerializeField] float m_DashSpeed = 6f;
         [Range(1f, 4f)] [SerializeField] float m_GravityMultiplier = 2f;
         [SerializeField] float m_RunCycleLegOffset = 0.2f; //specific to the character in sample assets, will need to be modified to work with others
         [SerializeField] float m_MoveSpeedMultiplier = 1f;
         [SerializeField] float m_AnimSpeedMultiplier = 1f;
-        [SerializeField] float m_GroundCheckDistance = 0.1f;
+        [SerializeField] float m_GroundCheckDistance = 0.3f;
         [SerializeField] float m_HitRange = 2f;
         [SerializeField] float m_LightAttackDamage = 10f;
         [SerializeField] float m_HeavyAttackDamage = 30f;
@@ -33,6 +36,7 @@ namespace MyAssets.Characters.ThirdPerson
         Vector3 m_CapsuleCenter;
         CapsuleCollider m_Capsule;
         bool m_Crouching;
+        QuickMovement m_QuickMoving;
 
 
         void Start()
@@ -45,6 +49,7 @@ namespace MyAssets.Characters.ThirdPerson
 
             m_Rigidbody.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationY | RigidbodyConstraints.FreezeRotationZ;
             m_OrigGroundCheckDistance = m_GroundCheckDistance;
+            m_QuickMoving = QuickMovement.None;
         }
 
 
@@ -60,6 +65,7 @@ namespace MyAssets.Characters.ThirdPerson
             move = Vector3.ProjectOnPlane(move, m_GroundNormal);
             m_TurnAmount = Mathf.Atan2(move.x, move.z);
             m_ForwardAmount = move.z;
+            m_QuickMoving = quickMovement;
 
             ApplyExtraTurnRotation();
 
@@ -80,36 +86,54 @@ namespace MyAssets.Characters.ThirdPerson
             UpdateAnimator(move);
         }
 
-        public void LightAttack()
+        public void Attack(AttackType attackType)
         {
-            RaycastHit hit;
-            Vector3 forward = transform.TransformDirection(Vector3.forward);
-            Vector3 origin = transform.position;
-
-            if (Physics.Raycast(origin, forward, out hit, m_HitRange))
+            if (attackType != AttackType.None)
             {
-                if (hit.transform.gameObject.tag == "Enemy")
+                RaycastHit hit;
+                Vector3 forward = transform.TransformDirection(Vector3.forward);
+                Vector3 origin = transform.position;
+                float attackDamage = 0f;
+
+                if (attackType == AttackType.Light)
                 {
-                    hit.transform.gameObject.SendMessage("TakeDamage", m_LightAttackDamage);
+                    attackDamage = m_LightAttackDamage;
+                    m_Animator.SetTrigger("LightAttack");
+                }
+                if (attackType == AttackType.Heavy)
+                {
+                    attackDamage = m_HeavyAttackDamage;
+                    m_Animator.SetTrigger("HeavyAttack");
+                }
+                if (Physics.Raycast(origin, forward, out hit, m_HitRange))
+                {
+                    if (hit.transform.gameObject.tag == "Enemy")
+                    {
+                        hit.transform.gameObject.SendMessage("TakeDamage", attackDamage);
+                    }
                 }
             }
-            m_Animator.SetTrigger("LightAttack");
         }
 
-        public void HeavyAttack()
+        public void Ability(Abilities ability)
         {
-            RaycastHit hit;
-            Vector3 forward = transform.TransformDirection(Vector3.forward);
-            Vector3 origin = transform.position;
+            // implement
+        }
 
-            if (Physics.Raycast(origin, forward, out hit, m_HitRange))
-            {
-                if (hit.transform.gameObject.tag == "Enemy")
-                {
-                    hit.transform.gameObject.SendMessage("TakeDamage", m_HeavyAttackDamage);
-                }
-            }
-            m_Animator.SetTrigger("HeavyAttack");
+        public void GetHit()
+        {
+            m_Animator.SetInteger("HitVariant", Random.Range(1, 6));
+            m_Animator.SetTrigger("Hit");
+        }
+
+        public void Die()
+        {
+            m_Animator.SetBool("Dead", true);
+        }
+
+        public void Revive()
+        {
+            m_Animator.SetBool("Dead", false);
         }
 
         void ScaleCapsuleForCrouching(bool crouch)
@@ -161,6 +185,26 @@ namespace MyAssets.Characters.ThirdPerson
             if (!m_IsGrounded)
             {
                 m_Animator.SetFloat("Jump", m_Rigidbody.velocity.y);
+            }
+            //Debug.Log(m_QuickMoving);
+            switch (m_QuickMoving)
+            {
+                case QuickMovement.None:
+                    break;
+                case QuickMovement.RollForward:
+                    m_Animator.SetTrigger("RollForward");
+                    break;
+                case QuickMovement.RollBackward:
+                    m_Animator.SetTrigger("RollBackward");
+                    break;
+                case QuickMovement.RollLeft:
+                    m_Animator.SetTrigger("RollLeft");
+                    break;
+                case QuickMovement.RollRight:
+                    m_Animator.SetTrigger("RollRight");
+                    break;
+                default:
+                    break;
             }
 
             // calculate which leg is behind, so as to leave that leg trailing in the jump animation
@@ -217,23 +261,32 @@ namespace MyAssets.Characters.ThirdPerson
             if (jump && !crouch && m_Animator.GetCurrentAnimatorStateInfo(0).IsName("Grounded"))
             {
                 // jump!
-                m_Rigidbody.velocity = new Vector3(m_Rigidbody.velocity.x, m_JumpPower, m_Rigidbody.velocity.z);
+                m_Rigidbody.velocity = new Vector3(m_Rigidbody.velocity.x, m_JumpSpeed, m_Rigidbody.velocity.z);
                 m_IsGrounded = false;
                 m_Animator.applyRootMotion = false;
                 m_GroundCheckDistance = 0.1f;
             }
 
-            if (quickMovement != QuickMovement.None && !crouch && m_Animator.GetCurrentAnimatorStateInfo(0).IsName("Grounded"))
-            {
-                if (quickMovement == QuickMovement.RollLeft)
-                {
-                    // implement
-                }
-                if (quickMovement == QuickMovement.RollRight)
-                {
-                    // implement
-                }
-            }
+            //if (quickMovement != QuickMovement.None && !crouch && m_Animator.GetCurrentAnimatorStateInfo(0).IsName("Grounded"))
+            //{
+            //    switch (quickMovement)
+            //    {
+            //        case QuickMovement.RollForward:
+            //            m_Rigidbody.velocity = new Vector3(m_Rigidbody.velocity.x, m_Rigidbody.velocity.y, m_RollSpeed);
+            //            break;
+            //        case QuickMovement.RollBackward:
+            //            m_Rigidbody.velocity = new Vector3(m_Rigidbody.velocity.x, m_Rigidbody.velocity.y, -m_RollSpeed);
+            //            break;
+            //        case QuickMovement.RollLeft:
+            //            m_Rigidbody.velocity = new Vector3(-m_RollSpeed, m_Rigidbody.velocity.y, m_Rigidbody.velocity.z);
+            //            break;
+            //        case QuickMovement.RollRight:
+            //            m_Rigidbody.velocity = new Vector3(m_RollSpeed, m_Rigidbody.velocity.y, m_Rigidbody.velocity.z);
+            //            break;
+            //        default:
+            //            break;
+            //    }
+            //}
         }
 
         void ApplyExtraTurnRotation()
